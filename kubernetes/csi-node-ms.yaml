@@ -1,0 +1,125 @@
+# +-------------------------------------------------------------------------
+# | Copyright (C) 2019 MacroSAN, Inc.
+# +-------------------------------------------------------------------------
+# | Licensed under the Apache License, Version 2.0 (the "License");
+# | you may not use this work except in compliance with the License.
+# | You may obtain a copy of the License in the LICENSE file, or at:
+# |
+# | http://www.apache.org/licenses/LICENSE-2.0
+# |
+# | Unless required by applicable law or agreed to in writing, software
+# | distributed under the License is distributed on an "AS IS" BASIS,
+# | WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# | See the License for the specific language governing permissions and
+# | limitations under the License.
+# +-------------------------------------------------------------------------
+
+kind: DaemonSet
+apiVersion: apps/v1beta2
+metadata:
+  name: csi-macrosan-node
+  namespace: kube-system
+  labels:
+    app: "csi-macrosan"
+    role: "node"
+    csi: "v1.0.0"
+    owner: "NF"
+spec:
+  selector:
+    matchLabels:
+      app: "csi-macrosan"
+      role: "node"
+      csi: "v1.0.0"
+      owner: "NF"
+  template:
+    metadata:
+      labels:
+        app: "csi-macrosan"
+        role: "node"
+        csi: "v1.0.0"
+        owner: "NF"
+    spec:
+      serviceAccount: csi-macrosan-node
+      hostNetwork: true
+      containers:
+        - name: driver-registrar
+          image: quay.io/k8scsi/csi-node-driver-registrar:v1.0.1
+          args:
+            - "--v=5"
+            - "--csi-address=$(ADDRESS)"
+            - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "rm -rf /registration/csi-macrosan /registration/csi-macrosan-reg.sock"]
+          env:
+            - name: ADDRESS
+              value: /var/lib/kubelet/plugins/csi-macrosan/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: /var/lib/kubelet/plugins/csi-macrosan/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /var/lib/kubelet/plugins/csi-macrosan
+            - name: registration-dir
+              mountPath: /registration/
+        - name: csi-macrosan
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          image: macrosan/csi-macrosan:v1.0.0
+          args :
+            - "--nodeid=$(NODE_ID)"
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--v=5"
+            - "--drivername=csi-macrosan"
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: unix:////var/lib/kubelet/plugins/csi-macrosan/csi.sock
+          imagePullPolicy: "IfNotPresent"
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /var/lib/kubelet/plugins/csi-macrosan
+            - name: mount-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: "Bidirectional"
+            - name: dev-dir
+              mountPath: /dev
+              mountPropagation: "HostToContainer"
+            - name: host-iscsi
+              mountPath: /etc/iscsi
+            - name: server-config
+              mountPath: /var/log/mconfig
+      volumes:
+        - name: mount-dir
+          hostPath:
+            path: /var/lib/kubelet
+        - name: plugin-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi-macrosan
+            type: DirectoryOrCreate
+        - name: dev-dir
+          hostPath:
+            path: /dev
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+            type: DirectoryOrCreate
+        - name: host-iscsi
+          hostPath:
+            path: /etc/iscsi/
+        - name: server-config
+          hostPath:
+            path: /var/log/nodeconfig
+            type: DirectoryOrCreate
+       
